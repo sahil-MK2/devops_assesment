@@ -9,37 +9,51 @@ validated with `fmt` / `init` / `validate` / `plan` only (see [Part 1: Terraform
 
 ## Secure architecture diagram
 
-```mermaid
-flowchart TB
-    internet(("Internet")):::ext
-    IGW["Internet Gateway"]:::edge
-
-    subgraph VPC["VPC 10.x.0.0/16"]
-        direction TB
-
-        subgraph PublicSubnets["Public subnets (multi-AZ)"]
-            direction LR
-            ALB["Application Load Balancer\nSG: alb-sg\nallow 80/443 from 0.0.0.0/0"]:::public
-            NAT["NAT Gateway\n(outbound egress only)"]:::public
-        end
-
-        subgraph PrivateSubnets["Private subnets (multi-AZ) — no inbound route from internet"]
-            direction LR
-            ECS["ECS / Fargate tasks\nSG: ecs-sg\nallow app port only from alb-sg"]:::private
-            RDS[("RDS PostgreSQL\nSG: rds-sg\nallow 5432 only from ecs-sg\npublicly_accessible = false")]:::private
-        end
-    end
-
-    internet -- "HTTP/HTTPS" --> IGW
-    IGW --> ALB
-    ALB -- "app port\n(only from alb-sg)" --> ECS
-    ECS -- "5432\n(only from ecs-sg)" --> RDS
-    ECS -. "outbound only\n(image pulls, etc. — via NAT)" .-> NAT
-
-    classDef ext fill:#eee,stroke:#999,color:#333;
-    classDef edge fill:#ffe8b3,stroke:#c9922c,color:#333;
-    classDef public fill:#cfe8ff,stroke:#3b7dd8,color:#0a2540;
-    classDef private fill:#d9f2d9,stroke:#3c9a3c,color:#0a2540;
+```
+    Internet
+       |
+       | HTTP/HTTPS (80/443)
+       v
++--------------------+
+|  Internet Gateway  |
++--------------------+
+       |
+=======|=====================================================================
+  VPC  |  10.x.0.0/16
+       v
+  +-------------------------------------------------------------+
+  |  PUBLIC SUBNETS (multi-AZ)                                   |
+  |                                                               |
+  |  +----------------------------+        +--------------------+ |
+  |  | Application Load Balancer  |        |    NAT Gateway     | |
+  |  | SG: alb-sg                 |        | (outbound egress   | |
+  |  | allow 80/443 from 0.0.0.0/0|        |  only)             | |
+  |  +--------------+-------------+        +----------^---------+ |
+  +-----------------|-------------------------------- |-----------+
+                     | app port                        | image pulls,
+                     | (only from alb-sg)               | package updates, etc.
+  +-----------------v-------------------------------- |-----------+
+  |  PRIVATE SUBNETS (multi-AZ) -- no inbound route from internet  |
+  |                                                                 |
+  |  +----------------------------+                                |
+  |  |  ECS / Fargate tasks       |--------------------------------+
+  |  |  SG: ecs-sg                |
+  |  |  allow app port only       |
+  |  |  from alb-sg               |
+  |  +--------------+-------------+
+  |                 | 5432
+  |                 | (only from ecs-sg)
+  |  +--------------v-------------+
+  |  |  RDS PostgreSQL            |
+  |  |  SG: rds-sg                |
+  |  |  allow 5432 only from      |
+  |  |  ecs-sg                    |
+  |  |  publicly_accessible=false |
+  |  |  storage encrypted         |
+  |  +----------------------------+
+  |                                                                 |
+  +-----------------------------------------------------------------+
+=============================================================================
 ```
 
 **Security boundaries enforced by the Terraform in this repo:**
