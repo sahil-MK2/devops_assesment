@@ -1,0 +1,12 @@
+# Example remote backend configuration for a real dev deployment.
+# Not used by default (see versions.tf, which uses a local backend so this
+# assessment can be validated without AWS credentials).
+#
+# To use: terraform init -backend-config=backend.hcl -reconfigure
+# (after replacing the "local" backend block in versions.tf with `backend "s3" {}`)
+
+bucket         = "hotel-devops-tfstate-dev"
+key            = "dev/terraform.tfstate"
+region         = "ap-south-1"
+dynamodb_table = "hotel-devops-tfstate-lock-dev"
+encrypt        = true

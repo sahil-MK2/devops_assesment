@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16
+    container_name: hotel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hotel_app
+      POSTGRES_PASSWORD: hotel_app_password
+      POSTGRES_DB: hotel_bookings
+    ports:
+      # Override with DB_HOST_PORT=5433 if port 5432 is already in use locally.
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - hotel_db_data:/var/lib/postgresql/data
+      # The postgres image only scans *.sql/*.sh files directly inside
+      # /docker-entrypoint-initdb.d (not subdirectories), and runs them once,
+      # in filename order, only when the data volume is first created.
+      - ./db/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
+      - ./db/migrations/002_indexes.sql:/docker-entrypoint-initdb.d/002_indexes.sql:ro
+      - ./db/seed/010_seed.sql:/docker-entrypoint-initdb.d/010_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotel_app -d hotel_bookings"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hotel_db_data:

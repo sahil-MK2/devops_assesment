@@ -1,0 +1,91 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform:
+    name: fmt / init / validate / plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+    defaults:
+      run:
+        working-directory: infra/envs/${{ matrix.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -recursive -diff ../../..
+
+      - name: Terraform init
+        # No AWS credentials are configured on purpose: this repo uses a
+        # local backend and plan-only provider settings so CI can validate
+        # the configuration without a real AWS account (see envs/*/versions.tf).
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file=${{ matrix.environment }}.tfvars \
+            -refresh=false \
+            -input=false \
+            -no-color \
+            -out=tfplan.binary
+          terraform show -no-color tfplan.binary > tfplan.txt
+
+      - name: Upload plan as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ matrix.environment }}
+          path: infra/envs/${{ matrix.environment }}/tfplan.txt
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'infra/envs/${{ matrix.environment }}/tfplan.txt';
+            let plan = fs.readFileSync(path, 'utf8');
+
+            const maxLen = 60000;
+            if (plan.length > maxLen) {
+              plan = plan.slice(0, maxLen) + '\n... (truncated, see workflow artifact for full plan)';
+            }
+
+            const body = [
+              `### Terraform Plan — \`${{ matrix.environment }}\``,
+              '<details><summary>Show plan</summary>',
+              '',
+              '```',
+              plan,
+              '```',
+              '</details>',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
