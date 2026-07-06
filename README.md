@@ -7,6 +7,65 @@ optimization, and backup/restore.
 Actual AWS deployment is **not** required or performed. Terraform is
 validated with `fmt` / `init` / `validate` / `plan` only (see [Part 1: Terraform](#part-1-terraform-infrastructure)).
 
+## Secure architecture diagram
+
+```mermaid
+flowchart TB
+    internet(("Internet")):::ext
+
+    subgraph AWS["AWS Account / Region"]
+        direction TB
+
+        subgraph VPC["VPC 10.x.0.0/16"]
+            direction TB
+
+            IGW["Internet Gateway"]:::edge
+
+            subgraph PublicSubnets["Public subnets (multi-AZ)"]
+                direction LR
+                ALB["Application Load Balancer\nSG: alb-sg\nallow 80/443 from 0.0.0.0/0"]:::public
+                NAT["NAT Gateway"]:::public
+            end
+
+            subgraph PrivateSubnets["Private subnets (multi-AZ) — no route to/from internet"]
+                direction LR
+                ECS["ECS / Fargate tasks\nSG: ecs-sg\nallow app port only from alb-sg"]:::private
+                RDS[("RDS PostgreSQL\nSG: rds-sg\nallow 5432 only from ecs-sg\npublicly_accessible = false")]:::private
+            end
+        end
+    end
+
+    internet -- "HTTP/HTTPS" --> IGW
+    IGW --> ALB
+    ALB -- "app port\n(only from alb-sg)" --> ECS
+    ECS -- "5432\n(only from ecs-sg)" --> RDS
+    ECS -. "outbound only\n(image pulls, etc.)" .-> NAT
+    NAT --> IGW
+
+    classDef ext fill:#eee,stroke:#999,color:#333;
+    classDef edge fill:#ffe8b3,stroke:#c9922c,color:#333;
+    classDef public fill:#cfe8ff,stroke:#3b7dd8,color:#0a2540;
+    classDef private fill:#d9f2d9,stroke:#3c9a3c,color:#0a2540;
+```
+
+**Security boundaries enforced by the Terraform in this repo:**
+
+- **Internet → ALB only.** The ALB security group (`alb-sg`) is the only
+  thing reachable from `0.0.0.0/0`, and only on the app port (80/HTTP by
+  default).
+- **ALB → ECS only.** The ECS task security group (`ecs-sg`) accepts
+  inbound traffic only from `alb-sg` — nothing else in the VPC, and nothing
+  from the internet, can reach the application tasks directly.
+- **ECS → RDS only.** The RDS security group (`rds-sg`) accepts inbound
+  traffic (port 5432) only from `ecs-sg`. RDS also sets
+  `publicly_accessible = false` and lives entirely in private subnets, so
+  it has no route to/from the internet regardless of security group rules.
+- **No public IPs on compute or data.** ECS tasks (`assign_public_ip =
+  false`) and RDS both live in private subnets; only the ALB (and the NAT
+  Gateway, for egress) sit in public subnets.
+- **Encryption at rest.** RDS storage is encrypted (`storage_encrypted =
+  true`).
+
 ## Repository layout
 
 ```
