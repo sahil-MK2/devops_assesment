@@ -12,26 +12,21 @@ validated with `fmt` / `init` / `validate` / `plan` only (see [Part 1: Terraform
 ```mermaid
 flowchart TB
     internet(("Internet")):::ext
+    IGW["Internet Gateway"]:::edge
 
-    subgraph AWS["AWS Account / Region"]
+    subgraph VPC["VPC 10.x.0.0/16"]
         direction TB
 
-        subgraph VPC["VPC 10.x.0.0/16"]
-            direction TB
+        subgraph PublicSubnets["Public subnets (multi-AZ)"]
+            direction LR
+            ALB["Application Load Balancer\nSG: alb-sg\nallow 80/443 from 0.0.0.0/0"]:::public
+            NAT["NAT Gateway\n(outbound egress only)"]:::public
+        end
 
-            IGW["Internet Gateway"]:::edge
-
-            subgraph PublicSubnets["Public subnets (multi-AZ)"]
-                direction LR
-                ALB["Application Load Balancer\nSG: alb-sg\nallow 80/443 from 0.0.0.0/0"]:::public
-                NAT["NAT Gateway"]:::public
-            end
-
-            subgraph PrivateSubnets["Private subnets (multi-AZ) — no route to/from internet"]
-                direction LR
-                ECS["ECS / Fargate tasks\nSG: ecs-sg\nallow app port only from alb-sg"]:::private
-                RDS[("RDS PostgreSQL\nSG: rds-sg\nallow 5432 only from ecs-sg\npublicly_accessible = false")]:::private
-            end
+        subgraph PrivateSubnets["Private subnets (multi-AZ) — no inbound route from internet"]
+            direction LR
+            ECS["ECS / Fargate tasks\nSG: ecs-sg\nallow app port only from alb-sg"]:::private
+            RDS[("RDS PostgreSQL\nSG: rds-sg\nallow 5432 only from ecs-sg\npublicly_accessible = false")]:::private
         end
     end
 
@@ -39,8 +34,7 @@ flowchart TB
     IGW --> ALB
     ALB -- "app port\n(only from alb-sg)" --> ECS
     ECS -- "5432\n(only from ecs-sg)" --> RDS
-    ECS -. "outbound only\n(image pulls, etc.)" .-> NAT
-    NAT --> IGW
+    ECS -. "outbound only\n(image pulls, etc. — via NAT)" .-> NAT
 
     classDef ext fill:#eee,stroke:#999,color:#333;
     classDef edge fill:#ffe8b3,stroke:#c9922c,color:#333;
